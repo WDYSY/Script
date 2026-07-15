@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Network MD 导出工具-position
 // @namespace    https://docs.scriptcat.org/
-// @version      3.4.1
+// @version      3.4.2
 // @description  拦截XHR/Fetch，支持选择接口导出MD文件，悬浮按钮可拖动
 // @author       You
 // @match        *://*.ctrip.com/*
@@ -301,7 +301,15 @@
     footInfo.style.cssText = 'color:#6c7086;font-size:12px;';
     footInfo.textContent = '共 ' + allItems.length + ' 个接口';
     const footBtns = document.createElement('div'); footBtns.style.cssText = 'display:flex;gap:8px;';
-    const cancelBtn = document.createElement('button'); cancelBtn.className = '__nmd_btn_sm'; cancelBtn.textContent = '取消'; cancelBtn.onclick = function () { overlay.remove(); };
+
+    // ← 修改：取消按钮样式与右侧操作按钮统一
+    const cancelBtn = document.createElement('button');
+    cancelBtn.style.cssText = 'background:transparent;border:1px solid #45475a;border-radius:7px;color:#6c7086;cursor:pointer;font-size:13px;font-weight:500;padding:7px 18px;transition:all 0.15s;white-space:nowrap;';
+    cancelBtn.textContent = '取消';
+    cancelBtn.onmouseover = function () { cancelBtn.style.borderColor = '#6c7086'; cancelBtn.style.color = '#cdd6f4'; };
+    cancelBtn.onmouseout  = function () { cancelBtn.style.borderColor = '#45475a'; cancelBtn.style.color = '#6c7086'; };
+    cancelBtn.onclick = function () { overlay.remove(); };
+
     const actionBtn = document.createElement('button');
     actionBtn.style.cssText = 'background:linear-gradient(135deg,#89b4fa,#cba6f7);border:none;border-radius:7px;color:#1e1e2e;cursor:not-allowed;font-size:13px;font-weight:600;padding:7px 18px;opacity:0.4;transition:opacity 0.15s;';
     actionBtn.textContent = mode === 'export' ? '📥 导出 (0)' : '📋 复制 (0)';
@@ -369,8 +377,6 @@
       filteredItems.forEach(function (i) { if (selectedUrls.has(i.url)) selectedUrls.delete(i.url); else selectedUrls.add(i.url); });
       renderList(); updateCount();
     };
-
-    // ← 修改：使用 generateFilename 生成文件名
     actionBtn.onclick = function () {
       if (!selectedUrls.size) return;
       const items = Array.from(requests.values()).filter(function (i) { return selectedUrls.has(i.url); });
@@ -383,7 +389,6 @@
       }
       overlay.remove();
     };
-
     overlay.onclick = function (e) { if (e.target === overlay) overlay.remove(); };
     document.addEventListener('keydown', function esc(e) {
       if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
@@ -456,7 +461,6 @@
       { icon: '📋', label: '选择接口复制',     color: '#89b4fa', action: function () { toggle(false); openSelectModal('copy');   } },
       { icon: '⚡', label: '导出全部接口',     color: '#f9e2af', action: function () {
         if (!requests.size) { showToast('❌ 暂无数据'); return; }
-        // ← 修改：使用 generateFilename 生成文件名
         const items = Array.from(requests.values());
         downloadMd(generateSelectedMd(items), generateFilename(items));
         showToast('✅ 已导出 ' + requests.size + ' 个接口'); toggle(false);
@@ -527,12 +531,8 @@
 
     function toggle(forceState) {
       menuVisible = forceState !== undefined ? forceState : !menuVisible;
-      if (menuVisible) {
-        positionMenu();
-        menu.style.display = 'flex';
-      } else {
-        menu.style.display = 'none';
-      }
+      if (menuVisible) { positionMenu(); menu.style.display = 'flex'; }
+      else { menu.style.display = 'none'; }
     }
 
     let isDragging = false, dragStartX = 0, dragStartY = 0, originPanelX = 0, originPanelY = 0;
@@ -594,7 +594,7 @@
     document.body.appendChild(menu);
     document.body.appendChild(panel);
 
-    console.log('%c🚀 Network MD v3.4.1 已启动 — 📡 可拖动，菜单四象限自适应', 'color:#89b4fa;font-size:13px;font-weight:bold');
+    console.log('%c🚀 Network MD v3.4.2 已启动 — 📡 可拖动，菜单四象限自适应', 'color:#89b4fa;font-size:13px;font-weight:bold');
   }
 
   // ─── 控制台命令 ──────────────────────────────────────────
@@ -607,15 +607,12 @@
     copyToClipboard(generateItemMd(item));
     console.log('%c✅ 已复制：' + item.name, 'color:#4caf50;font-weight:bold');
   };
-
-  // ← 修改：使用 generateFilename 生成文件名
   win.__exportAllRequests = function () {
     if (!requests.size) { console.warn('暂无数据'); return; }
     const items = Array.from(requests.values());
     downloadMd(generateSelectedMd(items), generateFilename(items));
     console.log('%c✅ 已导出 ' + requests.size + ' 条', 'color:#4caf50;font-weight:bold');
   };
-
   win.__listRequests = function () {
     console.table(Array.from(requests.values()).map(function (r, i) { return { '#': i + 1, name: r.name, method: r.method, time: r.time }; }));
   };
