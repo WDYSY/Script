@@ -4,6 +4,8 @@
 // @version      3.6.1
 // @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶
 // @author       You
+// @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
+// @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
 // @match        *://*.ctrip.com/*
 // @match        *://*.ctripcorp.com/*
 // @grant        GM_setClipboard
