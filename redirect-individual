@@ -3,9 +3,9 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.0.0
 // @description  在地址栏输入自定义短地址，自动跳转到映射的完整URL
-// @author       You
-// @updateURL    https://raw.githubusercontent.com/用户名/仓库名/main/url-map.user.js
-// @downloadURL  https://raw.githubusercontent.com/用户名/仓库名/main/url
+// @author       wy
+// @updateURL    https://github.com/WDYSY/Script/blob/main/redirect-individual
+// @downloadURL  https://github.com/WDYSY/Script/blob/main/redirect-individual
 // @match        *://*/*
 // @match        http://tvbk*
 // @run-at       document-start
