@@ -19,9 +19,7 @@
   // =============================================
   const URL_MAP = {
     'tvbk2902':   'https://tour.flight.fat29.qa.nt.ctripcorp.com/#/audit?module=2902',
-    'gh':         'https://github.com',
-    'mail':       'https://mail.google.com',
-    'yt':         'https://www.youtube.com',
+    'wyscat':         'https://github.com/WDYSY/Script/edit/main/%E6%9C%AC%E5%9C%B0%E7%9F%AD%E5%9C%B0%E5%9D%80%E6%98%A0%E5%B0%84.user.js',
     // 继续添加你的映射...
   };
 
