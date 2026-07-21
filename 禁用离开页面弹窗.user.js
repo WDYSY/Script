@@ -5,6 +5,8 @@
 // @description  禁止 beforeunload 离开提示
 // @match        *://你的网站域名/*
 // @run-at       document-start
+// @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/禁用离开页面弹窗.user.js
+// @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/禁用离开页面弹窗.user.js
 // @grant        none
 // ==/UserScript==
 
