@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         本地短地址映射
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  在地址栏输入自定义短地址，自动跳转到映射的完整URL
 // @author       wy
 // @updateURL    https://github.com/WDYSY/Script/blob/main/redirect-individual
