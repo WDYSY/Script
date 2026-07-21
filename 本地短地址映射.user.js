@@ -3,6 +3,8 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.0.2
 // @description  在地址栏输入自定义短地址，自动跳转到映射的完整URL
+// @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/本地短地址映射.user.js
+// @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/本地短地址映射.user.js
 // @author       You
 // @match        *://*/*
 // @match        http://tvbk*
