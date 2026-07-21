@@ -3,7 +3,9 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.0.1
 // @description  检测URL中包含特定路径时，自动添加&ssr=0参数并跳转
-// @author       You
+// @author       WY
+// @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/SSR参数自动添加.user.js
+// @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/SSR参数自动添加.user.js
 // @match        *://*/*
 // @run-at       document-start
 // @grant        none
