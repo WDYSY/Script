@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         本地短地址映射
 // @namespace    http://tampermonkey.net/
-// @version      1.0.1
+// @version      1.0.2
 // @description  在地址栏输入自定义短地址，自动跳转到映射的完整URL
 // @author       You
 // @match        *://*/*
