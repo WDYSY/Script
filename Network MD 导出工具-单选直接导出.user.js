@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Network MD 导出工具-单选直接导出
 // @namespace    https://docs.scriptcat.org/
-// @version      3.6.1
-// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶
+// @version      3.7.2
+// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶，支持导出Store State（自动剔除 lang 节点）
 // @author       You
 // @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
 // @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
@@ -41,12 +41,10 @@
     try { return JSON.stringify(obj, null, 2); } catch (e) { return String(obj); }
   }
 
-  // ── 关键改动：删除旧条目再重新插入，保证最新的在 Map 末尾 ──
   function storeRequest(data) {
     try {
       const urlObj = new URL(data.url, location.origin);
       const apiName = urlObj.pathname.split('/').pop() || urlObj.pathname;
-      // 若已存在则先删除，再插入到末尾（Map 按插入顺序迭代）
       if (requests.has(data.url)) requests.delete(data.url);
       requests.set(data.url, {
         name: apiName,
@@ -63,49 +61,68 @@
     } catch (e) {}
   }
 
-  // ── 获取列表时倒序，最新的排最前 ──
   function getOrderedItems() {
     return Array.from(requests.values()).reverse();
   }
 
   // ─── 拦截 XHR ───────────────────────────────────────────
 
-  const OriginalXHR = win.XMLHttpRequest;
-  function NewXHR() {
-    const xhr = new OriginalXHR();
-    let _method = 'GET', _url = '', _requestBody = null;
-    const _requestHeaders = {};
-    const origOpen = xhr.open.bind(xhr);
-    xhr.open = function (method, url) { _method = method; _url = url; return origOpen.apply(xhr, arguments); };
-    const origSetHeader = xhr.setRequestHeader.bind(xhr);
-    xhr.setRequestHeader = function (name, value) { _requestHeaders[name] = value; return origSetHeader(name, value); };
-    const origSend = xhr.send.bind(xhr);
-    xhr.send = function (body) {
-      _requestBody = safeParse(body);
-      xhr.addEventListener('load', function () {
-        try {
-          const urlObj = new URL(_url, location.origin);
-          const queryParams = {};
-          urlObj.searchParams.forEach(function (v, k) { queryParams[k] = v; });
-          const responseHeaders = {};
-          (xhr.getAllResponseHeaders() || '').trim().split(/[\r\n]+/).forEach(function (line) {
-            const idx = line.indexOf(': ');
-            if (idx > -1) responseHeaders[line.substring(0, idx)] = line.substring(idx + 2);
-          });
-          storeRequest({
-            url: _url, method: _method,
-            requestHeaders: Object.assign({}, _requestHeaders),
-            queryParams, requestBody: _requestBody,
-            response: safeParse(xhr.responseText), responseHeaders,
-          });
-        } catch (e) {}
-      });
-      return origSend(body);
+  // 改写原型方法而不是替换 window.XMLHttpRequest：
+  // 模块联邦/微前端子应用里的 XHR 包装对象也能被识别，且不破坏 instanceof 与子类继承。
+  // 拦截失败绝不能让业务抛错——页面里存在只实现 open/send 的轻量 XHR 占位对象。
+  const XHRProto = win.XMLHttpRequest && win.XMLHttpRequest.prototype;
+  if (XHRProto && !XHRProto.__nmdPatched) {
+    const xhrMeta = new WeakMap();
+    const origOpen = XHRProto.open;
+    const origSetHeader = XHRProto.setRequestHeader;
+    const origSend = XHRProto.send;
+
+    XHRProto.open = function (method, url) {
+      try { xhrMeta.set(this, { method: method, url: url, headers: {} }); } catch (e) {}
+      return origOpen.apply(this, arguments);
     };
-    return xhr;
+
+    XHRProto.setRequestHeader = function (name, value) {
+      try {
+        const meta = xhrMeta.get(this);
+        if (meta) meta.headers[name] = value;
+      } catch (e) {}
+      return origSetHeader.apply(this, arguments);
+    };
+
+    XHRProto.send = function (body) {
+      const xhr = this;
+      try {
+        const meta = xhrMeta.get(xhr);
+        if (meta && typeof xhr.addEventListener === 'function') {
+          const requestBody = safeParse(body);
+          xhr.addEventListener('load', function () {
+            try {
+              const urlObj = new URL(meta.url, location.origin);
+              const queryParams = {};
+              urlObj.searchParams.forEach(function (v, k) { queryParams[k] = v; });
+              const responseHeaders = {};
+              (xhr.getAllResponseHeaders() || '').trim().split(/[\r\n]+/).forEach(function (line) {
+                const idx = line.indexOf(': ');
+                if (idx > -1) responseHeaders[line.substring(0, idx)] = line.substring(idx + 2);
+              });
+              storeRequest({
+                url: meta.url, method: meta.method,
+                requestHeaders: Object.assign({}, meta.headers),
+                queryParams, requestBody,
+                response: safeParse(xhr.responseText), responseHeaders,
+              });
+            } catch (e) {}
+          });
+        }
+      } catch (e) {}
+      return origSend.apply(this, arguments);
+    };
+
+    try {
+      Object.defineProperty(XHRProto, '__nmdPatched', { value: true, enumerable: false, configurable: true });
+    } catch (e) { XHRProto.__nmdPatched = true; }
   }
-  NewXHR.prototype = OriginalXHR.prototype;
-  win.XMLHttpRequest = NewXHR;
 
   // ─── 拦截 Fetch ──────────────────────────────────────────
 
@@ -190,11 +207,9 @@
   function generateFilename(items) {
     const ts = new Date().toISOString().replace('T', '_').replace(/:/g, '-').slice(0, 19);
     if (!Array.isArray(items)) {
-      // 单条
       const name = (items.name || 'export').replace(/[\\/:*?"<>|]/g, '_');
       return name + '_' + ts + '.md';
     }
-    // 多条
     const firstName = (items[0].name || 'export').replace(/[\\/:*?"<>|]/g, '_');
     return items.length === 1
       ? firstName + '_' + ts + '.md'
@@ -218,6 +233,131 @@
     const ta = document.createElement('textarea');
     ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0;';
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+  }
+
+  // ─── ✨ 新增：导出 Store State 为 JSON 文件（剔除 lang） ───
+
+  // 需要从 state 中整体剔除的节点名，大小写不敏感
+  const LANG_KEY = 'lang';
+
+  /**
+   * 深度剥离键名为 lang 的节点，返回 { value, count }
+   * 只在命中路径上做浅拷贝，避免污染页面里真实的 store 状态
+   */
+  function stripLangNode(root) {
+    const seen = new WeakMap();
+    let count = 0;
+
+    function walk(value, depth) {
+      if (!value || typeof value !== 'object' || depth > 64) return value;
+      if (seen.has(value)) return value;
+      seen.set(value, true);
+
+      if (Array.isArray(value)) {
+        let copy = null;
+        for (let i = 0; i < value.length; i++) {
+          const child = walk(value[i], depth + 1);
+          if (child !== value[i]) {
+            if (!copy) copy = value.slice();
+            copy[i] = child;
+          }
+        }
+        return copy || value;
+      }
+
+      let copy = null;
+      const keys = Object.keys(value);
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        if (k.toLowerCase() === LANG_KEY) {
+          if (!copy) copy = Object.assign({}, value);
+          delete copy[k];
+          count++;
+          continue;
+        }
+        let child;
+        try { child = value[k]; } catch (e) { continue; }
+        const stripped = walk(child, depth + 1);
+        if (stripped !== child) {
+          if (!copy) copy = Object.assign({}, value);
+          copy[k] = stripped;
+        }
+      }
+      return copy || value;
+    }
+
+    return { value: walk(root, 0), count };
+  }
+
+  /**
+   * 尝试从页面上下文中找到 _$controller.store.getState()
+   * 剔除 lang 节点后将结果下载为 state_nolang.json
+   */
+  function exportStoreState() {
+    try {
+      // 尝试直接访问（油猴脚本沙箱可能无法直接访问页面变量）
+      let state = null;
+      let source = '';
+
+      // 方式一：通过 unsafeWindow 直接访问
+      if (win._$controller && win._$controller.store && typeof win._$controller.store.getState === 'function') {
+        state = win._$controller.store.getState();
+        source = 'win._$controller.store';
+      }
+      // 方式二：通过 window 访问（备用）
+      else if (window._$controller && window._$controller.store && typeof window._$controller.store.getState === 'function') {
+        state = window._$controller.store.getState();
+        source = 'window._$controller.store';
+      }
+
+      if (state === null && state === undefined) {
+        showToast('❌ 未找到 _$controller.store，请确认页面已加载完毕');
+        console.warn('[NMD] _$controller.store.getState() 不可访问，请在控制台手动执行：\ncopy(_$controller.store.getState())');
+        return;
+      }
+
+      // 剔除 lang 节点（失败则原样导出，不阻断流程）
+      let stateForExport = state;
+      let langRemoved = 0;
+      try {
+        const stripped = stripLangNode(state);
+        stateForExport = stripped.value;
+        langRemoved = stripped.count;
+      } catch (e) {
+        console.warn('[NMD] 剔除 lang 节点失败，已回退为原始 state', e);
+      }
+
+      // 序列化
+      let json;
+      try {
+        json = JSON.stringify(stateForExport, null, 2);
+      } catch (e) {
+        showToast('❌ State 序列化失败：' + e.message);
+        console.error('[NMD] State 序列化失败', e);
+        return;
+      }
+
+      // 生成文件名
+      const ts = new Date().toISOString().replace('T', '_').replace(/:/g, '-').slice(0, 19);
+      const filename = 'state_nolang_' + ts + '.json';
+
+      // 下载
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+
+      showToast('✅ ' + filename + ' 已导出（已移除 ' + langRemoved + ' 处 lang）');
+      console.log('%c✅ [NMD] state_nolang.json 已导出，来源：' + source + '，移除 lang 节点 ' + langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
+
+    } catch (e) {
+      showToast('❌ 导出失败：' + e.message);
+      console.error('[NMD] exportStoreState 异常', e);
+    }
   }
 
   // ─── Toast ───────────────────────────────────────────────
@@ -257,8 +397,9 @@
       '.__nmd_act_btn{border:none;border-radius:6px;cursor:pointer;font-size:11px;padding:4px 9px;white-space:nowrap;font-weight:600;transition:opacity 0.1s;}',
       '.__nmd_act_btn:hover{opacity:0.85;}',
       '.__nmd_dragging{user-select:none !important;}',
-      // 最新标签
       '.__nmd_new_tag{display:inline-block;background:#2a3a1a;color:#a6e3a1;border-radius:3px;font-size:10px;font-weight:700;padding:1px 5px;flex-shrink:0;}',
+      // ✨ 新增：分割线样式
+      '.__nmd_divider{height:1px;background:#313244;margin:4px 0;}',
     ].join('');
     document.head.appendChild(s);
   }
@@ -293,7 +434,6 @@
     if (old) old.remove();
     injectStyles();
 
-    // 最新的排最前
     const allItems = getOrderedItems();
     if (!allItems.length) { showToast('❌ 暂无捕获的请求'); return; }
 
@@ -306,7 +446,6 @@
     const box = document.createElement('div');
     box.style.cssText = 'background:#1e1e2e;border:1px solid #313244;border-radius:14px;width:660px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.55);animation:__nmd_slideIn 0.18s ease;overflow:hidden;';
 
-    // 头部
     const head = document.createElement('div');
     head.style.cssText = 'padding:14px 18px 12px;border-bottom:1px solid #313244;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
     const headTitle = document.createElement('span');
@@ -320,7 +459,6 @@
     headClose.onclick = function () { overlay.remove(); };
     head.appendChild(headTitle); head.appendChild(headClose);
 
-    // 搜索栏
     const bar = document.createElement('div');
     bar.style.cssText = 'padding:9px 16px;border-bottom:1px solid #313244;display:flex;align-items:center;gap:8px;flex-shrink:0;background:#181825;';
     const searchEl = document.createElement('input');
@@ -333,7 +471,6 @@
     countEl.textContent = '共 ' + allItems.length + ' 个';
     bar.appendChild(searchEl); bar.appendChild(countEl);
 
-    // 提示条
     const tip = document.createElement('div');
     tip.style.cssText = 'padding:6px 16px;background:#181825;border-bottom:1px solid #313244;flex-shrink:0;';
     const tipText = document.createElement('span');
@@ -343,11 +480,9 @@
       : '💡 点击任意行 → 立即复制该接口内容到剪贴板　|　最新请求置顶';
     tip.appendChild(tipText);
 
-    // 列表
     const listEl = document.createElement('div');
     listEl.style.cssText = 'flex:1;overflow-y:auto;';
 
-    // 底部
     const foot = document.createElement('div');
     foot.style.cssText = 'padding:11px 16px;border-top:1px solid #313244;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#181825;';
     const footInfo = document.createElement('span');
@@ -372,7 +507,6 @@
         const row = document.createElement('div');
         row.className = '__nmd_row';
 
-        // ── NEW 标签（仅第一条，即最新） ──
         if (idx === 0 && !searchEl.value.trim()) {
           const newTag = document.createElement('span');
           newTag.className = '__nmd_new_tag';
@@ -400,7 +534,6 @@
         timeEl.style.cssText = 'color:#45475a;font-size:11px;white-space:nowrap;flex-shrink:0;';
         timeEl.textContent = item.time;
 
-        // hover 时显示的操作按钮
         const actions = document.createElement('div');
         actions.className = '__nmd_actions';
 
@@ -435,7 +568,6 @@
         row.appendChild(timeEl);
         row.appendChild(actions);
 
-        // 点击行触发主操作
         row.onclick = function () {
           if (mode === 'export') {
             downloadMd(generateSingleMd(item), generateFilename(item));
@@ -478,7 +610,6 @@
     if (old) old.remove();
     injectStyles();
 
-    // 最新的排最前
     const allItems = getOrderedItems();
     if (!allItems.length) { showToast('❌ 暂无捕获的请求'); return; }
 
@@ -492,7 +623,6 @@
     const box = document.createElement('div');
     box.style.cssText = 'background:#1e1e2e;border:1px solid #313244;border-radius:14px;width:660px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.55);animation:__nmd_slideIn 0.18s ease;overflow:hidden;';
 
-    // 头部
     const head = document.createElement('div');
     head.style.cssText = 'padding:14px 18px 12px;border-bottom:1px solid #313244;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;';
     const headTitle = document.createElement('span');
@@ -506,7 +636,6 @@
     headClose.onclick = function () { overlay.remove(); };
     head.appendChild(headTitle); head.appendChild(headClose);
 
-    // 搜索 + 全选/反选
     const bar = document.createElement('div');
     bar.style.cssText = 'padding:9px 16px;border-bottom:1px solid #313244;display:flex;align-items:center;gap:8px;flex-shrink:0;background:#181825;';
     const searchEl = document.createElement('input');
@@ -521,7 +650,6 @@
     countEl.textContent = '已选 0 / ' + allItems.length;
     bar.appendChild(searchEl); bar.appendChild(selAllBtn); bar.appendChild(invertBtn); bar.appendChild(countEl);
 
-    // 提示条
     const tip = document.createElement('div');
     tip.style.cssText = 'padding:6px 16px;background:#181825;border-bottom:1px solid #313244;flex-shrink:0;';
     const tipText = document.createElement('span');
@@ -529,11 +657,9 @@
     tipText.textContent = '💡 勾选需要的接口，点击「导出」按钮批量下载为一个 .md 文件　|　最新请求置顶';
     tip.appendChild(tipText);
 
-    // 列表
     const listEl = document.createElement('div');
     listEl.style.cssText = 'flex:1;overflow-y:auto;';
 
-    // 底部
     const foot = document.createElement('div');
     foot.style.cssText = 'padding:11px 16px;border-top:1px solid #313244;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#181825;';
     const footInfo = document.createElement('span');
@@ -568,7 +694,6 @@
         row.className = '__nmd_row' + (isSel ? ' sel' : '');
         if (isSel) row.style.background = '#1a2f4a';
 
-        // ── NEW 标签（最新一条） ──
         if (idx === 0 && !searchEl.value.trim()) {
           const newTag = document.createElement('span');
           newTag.className = '__nmd_new_tag';
@@ -634,7 +759,6 @@
 
     actionBtn.onclick = function () {
       if (!selectedUrls.size) return;
-      // 按当前列表顺序（最新在前）过滤出勾选项
       const items = getOrderedItems().filter(function (i) { return selectedUrls.has(i.url); });
       downloadMd(generateMultiMd(items), generateFilename(items));
       showToast('✅ 已导出 ' + items.length + ' 个接口');
@@ -686,7 +810,23 @@
     menuHead.textContent = 'NETWORK MD EXPORTER';
     menu.appendChild(menuHead);
 
+    // ✨ 新增辅助函数：在菜单中插入分割线
+    function addDivider() {
+      const d = document.createElement('div');
+      d.className = '__nmd_divider';
+      menu.appendChild(d);
+    }
+
+    // ✨ 新增辅助函数：在菜单中插入分组标题
+    function addGroupLabel(text) {
+      const label = document.createElement('div');
+      label.style.cssText = 'color:#45475a;font-size:10px;font-weight:700;padding:5px 10px 3px;letter-spacing:0.8px;';
+      label.textContent = text;
+      menu.appendChild(label);
+    }
+
     const menuItemsCfg = [
+      // ── 分组：MD 导出 ──
       {
         icon: '📥', label: '单击接口直接导出 .md', color: '#a6e3a1',
         action: function () { toggle(false); openListModal('export'); },
@@ -706,10 +846,19 @@
         },
       },
       {
-        // ── 新增：导出所选接口 ──
         icon: '☑️', label: '导出所选接口', color: '#cba6f7',
         action: function () { toggle(false); openSelectModal(); },
       },
+      // ── 分隔符（用特殊标记） ──
+      { divider: true },
+      // ── 分组：Store State ──
+      {
+        icon: '💾', label: '导出 Store State JSON（去 lang）', color: '#f5c2e7',
+        action: function () { toggle(false); exportStoreState(); },
+      },
+      // ── 分隔符 ──
+      { divider: true },
+      // ── 分组：工具 ──
       {
         icon: '📊', label: '控制台查看列表', color: '#94e2d5',
         action: function () {
@@ -729,7 +878,12 @@
       },
     ];
 
+    // ✨ 渲染菜单项（支持分割线）
     menuItemsCfg.forEach(function (cfg) {
+      if (cfg.divider) {
+        addDivider();
+        return;
+      }
       const btn = document.createElement('button');
       btn.style.cssText = 'background:transparent;border:none;border-radius:7px;color:' + cfg.color + ';cursor:pointer;font-size:13px;padding:8px 10px;text-align:left;width:100%;display:flex;align-items:center;gap:8px;transition:background 0.1s;';
       btn.innerHTML = '<span style="font-size:14px;flex-shrink:0;">' + cfg.icon + '</span><span>' + cfg.label + '</span>';
@@ -827,7 +981,7 @@
     document.body.appendChild(menu);
     document.body.appendChild(panel);
 
-    console.log('%c🚀 Network MD v3.6.0 已启动 — 最新请求置顶，支持单选/多选导出', 'color:#89b4fa;font-size:13px;font-weight:bold');
+    console.log('%c🚀 Network MD v3.7.2 已启动 — 最新请求置顶，支持单选/多选导出，Store State 导出会剔除 lang 节点', 'color:#89b4fa;font-size:13px;font-weight:bold');
   }
 
   // ─── 控制台命令 ──────────────────────────────────────────
@@ -850,6 +1004,8 @@
     console.table(getOrderedItems().map(function (r, i) { return { '#': i + 1, name: r.name, method: r.method, time: r.time }; }));
   };
   win.__clearRequests = function () { requests.clear(); console.log('🗑️ 已清空'); };
+  // ✨ 新增控制台命令
+  win.__exportStoreState = function () { exportStoreState(); };
 
   // ─── 初始化 ──────────────────────────────────────────────
 
