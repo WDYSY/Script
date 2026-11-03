@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Network MD 导出工具-单选直接导出
 // @namespace    https://docs.scriptcat.org/
-// @version      3.8.0
-// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶，支持导出/复制Store State（自动剔除 lang 节点）
+// @version      3.9.0
+// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶，支持导出/复制Store State（自动剔除 lang / inputLanguage 节点）
 // @author       You
 // @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
 // @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
@@ -241,16 +241,16 @@
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
   }
 
-  // ─── 导出 / 复制 Store State（剔除 lang） ───
+  // ─── 导出 / 复制 Store State（剔除 lang / inputLanguage） ───
 
-  // 需要从 state 中整体剔除的节点名，大小写不敏感
-  const LANG_KEY = 'lang';
+  // 需要从 state 中整体剔除的节点名（统一转小写后比较，大小写不敏感）
+  const STRIP_KEYS = new Set(['lang', 'inputlanguage']);
 
   /**
-   * 深度剥离键名为 lang 的节点，返回 { value, count }
+   * 深度剥离键名为 lang / inputLanguage 的节点，返回 { value, count }
    * 只在命中路径上做浅拷贝，避免污染页面里真实的 store 状态
    */
-  function stripLangNode(root) {
+  function stripLangNodes(root) {
     const seen = new WeakMap();
     let count = 0;
 
@@ -275,7 +275,7 @@
       const keys = Object.keys(value);
       for (let i = 0; i < keys.length; i++) {
         const k = keys[i];
-        if (k.toLowerCase() === LANG_KEY) {
+        if (STRIP_KEYS.has(k.toLowerCase())) {
           if (!copy) copy = Object.assign({}, value);
           delete copy[k];
           count++;
@@ -296,7 +296,7 @@
   }
 
   /**
-   * 从页面上下文中找到 _$controller.store.getState()，剔除 lang 节点后序列化
+   * 从页面上下文中找到 _$controller.store.getState()，剔除 lang / inputLanguage 节点后序列化
    * 返回 { json, langRemoved, source }；拿不到 state 或序列化失败时返回 null（已弹提示）
    */
   function collectStoreState() {
@@ -326,7 +326,7 @@
       let stateForExport = state;
       let langRemoved = 0;
       try {
-        const stripped = stripLangNode(state);
+        const stripped = stripLangNodes(state);
         stateForExport = stripped.value;
         langRemoved = stripped.count;
       } catch (e) {
@@ -370,8 +370,8 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(a.href);
 
-      showToast('✅ ' + filename + ' 已导出（已移除 ' + result.langRemoved + ' 处 lang）');
-      console.log('%c✅ [NMD] ' + filename + ' 已导出，来源：' + result.source + '，移除 lang 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
+      showToast('✅ ' + filename + ' 已导出（已移除 ' + result.langRemoved + ' 处 lang/inputLanguage）');
+      console.log('%c✅ [NMD] ' + filename + ' 已导出，来源：' + result.source + '，移除 lang/inputLanguage 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
 
     } catch (e) {
       showToast('❌ 导出失败：' + e.message);
@@ -388,8 +388,8 @@
       if (!result) return;
 
       copyToClipboard(result.json);
-      showToast('✅ Store State 已复制到剪贴板（已移除 ' + result.langRemoved + ' 处 lang）');
-      console.log('%c✅ [NMD] Store State 已复制到剪贴板，来源：' + result.source + '，移除 lang 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
+      showToast('✅ Store State 已复制到剪贴板（已移除 ' + result.langRemoved + ' 处 lang/inputLanguage）');
+      console.log('%c✅ [NMD] Store State 已复制到剪贴板，来源：' + result.source + '，移除 lang/inputLanguage 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
 
     } catch (e) {
       showToast('❌ 复制失败：' + e.message);
@@ -890,11 +890,11 @@
       { divider: true },
       // ── 分组：Store State ──
       {
-        icon: '💾', label: '导出 Store State JSON（去 lang）', color: '#f5c2e7',
+        icon: '💾', label: '导出 State JSON（去 lang/inputLanguage）', color: '#f5c2e7',
         action: function () { toggle(false); exportStoreState(); },
       },
       {
-        icon: '📋', label: '复制 Store State JSON（去 lang）', color: '#f5c2e7',
+        icon: '📋', label: '复制 State JSON（去 lang/inputLanguage）', color: '#f5c2e7',
         action: function () { toggle(false); copyStoreState(); },
       },
       // ── 分隔符 ──
@@ -1022,7 +1022,7 @@
     document.body.appendChild(menu);
     document.body.appendChild(panel);
 
-    console.log('%c🚀 Network MD v3.8.0 已启动 — 最新请求置顶，支持单选/多选导出，Store State 导出/复制会剔除 lang 节点', 'color:#89b4fa;font-size:13px;font-weight:bold');
+    console.log('%c🚀 Network MD v3.9.0 已启动 — 最新请求置顶，支持单选/多选导出，Store State 导出/复制会剔除 lang/inputLanguage 节点', 'color:#89b4fa;font-size:13px;font-weight:bold');
   }
 
   // ─── 控制台命令 ──────────────────────────────────────────
