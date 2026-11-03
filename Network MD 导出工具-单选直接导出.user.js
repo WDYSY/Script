@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Network MD 导出工具-单选直接导出
 // @namespace    https://docs.scriptcat.org/
-// @version      3.9.0
-// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶，支持导出/复制Store State（自动剔除 lang / inputLanguage 节点）
+// @version      3.10.0
+// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶，支持导出/复制Store State（自动剔除 lang / inputLanguage 节点，键名按字母排序）
 // @author       You
 // @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
 // @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
@@ -241,7 +241,7 @@
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
   }
 
-  // ─── 导出 / 复制 Store State（剔除 lang / inputLanguage） ───
+  // ─── 导出 / 复制 Store State（剔除 lang / inputLanguage，键名按字母排序） ───
 
   // 需要从 state 中整体剔除的节点名（统一转小写后比较，大小写不敏感）
   const STRIP_KEYS = new Set(['lang', 'inputlanguage']);
@@ -295,8 +295,35 @@
     return { value: walk(root, 0), count };
   }
 
+  // 键名排序比较：先按小写字母序，同字母时按原始写法分先后，保证输出顺序稳定
+  function keyAlphaCompare(a, b) {
+    const la = a.toLowerCase(), lb = b.toLowerCase();
+    if (la < lb) return -1;
+    if (la > lb) return 1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+
   /**
-   * 从页面上下文中找到 _$controller.store.getState()，剔除 lang / inputLanguage 节点后序列化
+   * stringify 的 replacer：把普通对象的键按字母序重建后返回，输出即为排序后的 JSON
+   * 只重排原型为 Object.prototype/null 的普通对象——Date 等自带 toJSON 的特殊对象
+   * 一旦重建成普通对象会丢失自身序列化逻辑；数组是有序列表，保持原顺序不动
+   */
+  function sortedKeysReplacer(key, value) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const proto = Object.getPrototypeOf(value);
+      if (proto === Object.prototype || proto === null) {
+        const sorted = {};
+        const keys = Object.keys(value).sort(keyAlphaCompare);
+        for (let i = 0; i < keys.length; i++) sorted[keys[i]] = value[keys[i]];
+        return sorted;
+      }
+    }
+    return value;
+  }
+
+  /**
+   * 从页面上下文中找到 _$controller.store.getState()，剔除 lang / inputLanguage 节点、
+   * 对象键名按字母排序后序列化
    * 返回 { json, langRemoved, source }；拿不到 state 或序列化失败时返回 null（已弹提示）
    */
   function collectStoreState() {
@@ -333,9 +360,9 @@
         console.warn('[NMD] 剔除 lang 节点失败，已回退为原始 state', e);
       }
 
-      // 序列化
+      // 序列化（普通对象的键名按字母排序）
       try {
-        return { json: JSON.stringify(stateForExport, null, 2), langRemoved, source };
+        return { json: JSON.stringify(stateForExport, sortedKeysReplacer, 2), langRemoved, source };
       } catch (e) {
         showToast('❌ State 序列化失败：' + e.message);
         console.error('[NMD] State 序列化失败', e);
@@ -370,7 +397,7 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(a.href);
 
-      showToast('✅ ' + filename + ' 已导出（已移除 ' + result.langRemoved + ' 处 lang/inputLanguage）');
+      showToast('✅ ' + filename + ' 已导出（已移除 ' + result.langRemoved + ' 处 lang/inputLanguage，键名已按字母排序）');
       console.log('%c✅ [NMD] ' + filename + ' 已导出，来源：' + result.source + '，移除 lang/inputLanguage 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
 
     } catch (e) {
@@ -388,7 +415,7 @@
       if (!result) return;
 
       copyToClipboard(result.json);
-      showToast('✅ Store State 已复制到剪贴板（已移除 ' + result.langRemoved + ' 处 lang/inputLanguage）');
+      showToast('✅ Store State 已复制到剪贴板（已移除 ' + result.langRemoved + ' 处 lang/inputLanguage，键名已按字母排序）');
       console.log('%c✅ [NMD] Store State 已复制到剪贴板，来源：' + result.source + '，移除 lang/inputLanguage 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
 
     } catch (e) {
@@ -1022,7 +1049,7 @@
     document.body.appendChild(menu);
     document.body.appendChild(panel);
 
-    console.log('%c🚀 Network MD v3.9.0 已启动 — 最新请求置顶，支持单选/多选导出，Store State 导出/复制会剔除 lang/inputLanguage 节点', 'color:#89b4fa;font-size:13px;font-weight:bold');
+    console.log('%c🚀 Network MD v3.10.0 已启动 — 最新请求置顶，支持单选/多选导出，Store State 导出/复制会剔除 lang/inputLanguage 节点并按字母排序键名', 'color:#89b4fa;font-size:13px;font-weight:bold');
   }
 
   // ─── 控制台命令 ──────────────────────────────────────────
