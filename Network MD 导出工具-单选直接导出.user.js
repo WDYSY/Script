@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Network MD 导出工具-单选直接导出
 // @namespace    https://docs.scriptcat.org/
-// @version      3.7.2
-// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶，支持导出Store State（自动剔除 lang 节点）
+// @version      3.8.0
+// @description  拦截XHR/Fetch，点击接口直接导出MD文件，悬浮按钮可拖动，最新请求置顶，支持导出/复制Store State（自动剔除 lang 节点）
 // @author       You
 // @updateURL    https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
 // @downloadURL  https://raw.githubusercontent.com/WDYSY/Script/main/Network MD 导出工具-单选直接导出.user.js
@@ -204,8 +204,14 @@
 
   // ─── 生成文件名 ───────────────────────────────────────────
 
+  // 文件名时间戳统一用北京时间（UTC+8）：toISOString() 是 UTC，直接用会比北京时间慢 8 小时
+  function beijingTimestamp() {
+    return new Date(Date.now() + 8 * 3600 * 1000)
+      .toISOString().replace('T', '_').replace(/:/g, '-').slice(0, 19);
+  }
+
   function generateFilename(items) {
-    const ts = new Date().toISOString().replace('T', '_').replace(/:/g, '-').slice(0, 19);
+    const ts = beijingTimestamp();
     if (!Array.isArray(items)) {
       const name = (items.name || 'export').replace(/[\\/:*?"<>|]/g, '_');
       return name + '_' + ts + '.md';
@@ -235,7 +241,7 @@
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
   }
 
-  // ─── ✨ 新增：导出 Store State 为 JSON 文件（剔除 lang） ───
+  // ─── 导出 / 复制 Store State（剔除 lang） ───
 
   // 需要从 state 中整体剔除的节点名，大小写不敏感
   const LANG_KEY = 'lang';
@@ -290,10 +296,10 @@
   }
 
   /**
-   * 尝试从页面上下文中找到 _$controller.store.getState()
-   * 剔除 lang 节点后将结果下载为 state_nolang.json
+   * 从页面上下文中找到 _$controller.store.getState()，剔除 lang 节点后序列化
+   * 返回 { json, langRemoved, source }；拿不到 state 或序列化失败时返回 null（已弹提示）
    */
-  function exportStoreState() {
+  function collectStoreState() {
     try {
       // 尝试直接访问（油猴脚本沙箱可能无法直接访问页面变量）
       let state = null;
@@ -310,10 +316,10 @@
         source = 'window._$controller.store';
       }
 
-      if (state === null && state === undefined) {
+      if (state === null || state === undefined) {
         showToast('❌ 未找到 _$controller.store，请确认页面已加载完毕');
         console.warn('[NMD] _$controller.store.getState() 不可访问，请在控制台手动执行：\ncopy(_$controller.store.getState())');
-        return;
+        return null;
       }
 
       // 剔除 lang 节点（失败则原样导出，不阻断流程）
@@ -328,21 +334,34 @@
       }
 
       // 序列化
-      let json;
       try {
-        json = JSON.stringify(stateForExport, null, 2);
+        return { json: JSON.stringify(stateForExport, null, 2), langRemoved, source };
       } catch (e) {
         showToast('❌ State 序列化失败：' + e.message);
         console.error('[NMD] State 序列化失败', e);
-        return;
+        return null;
       }
 
-      // 生成文件名
-      const ts = new Date().toISOString().replace('T', '_').replace(/:/g, '-').slice(0, 19);
-      const filename = 'state_nolang_' + ts + '.json';
+    } catch (e) {
+      showToast('❌ 获取 State 失败：' + e.message);
+      console.error('[NMD] collectStoreState 异常', e);
+      return null;
+    }
+  }
+
+  /**
+   * 导出 Store State：剔除 lang 后下载为 state_nolang_<北京时间>.json
+   */
+  function exportStoreState() {
+    try {
+      const result = collectStoreState();
+      if (!result) return;
+
+      // 生成文件名（北京时间，含时分秒）
+      const filename = 'state_nolang_' + beijingTimestamp() + '.json';
 
       // 下载
-      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+      const blob = new Blob([result.json], { type: 'application/json;charset=utf-8' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = filename;
@@ -351,12 +370,30 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(a.href);
 
-      showToast('✅ ' + filename + ' 已导出（已移除 ' + langRemoved + ' 处 lang）');
-      console.log('%c✅ [NMD] state_nolang.json 已导出，来源：' + source + '，移除 lang 节点 ' + langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
+      showToast('✅ ' + filename + ' 已导出（已移除 ' + result.langRemoved + ' 处 lang）');
+      console.log('%c✅ [NMD] ' + filename + ' 已导出，来源：' + result.source + '，移除 lang 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
 
     } catch (e) {
       showToast('❌ 导出失败：' + e.message);
       console.error('[NMD] exportStoreState 异常', e);
+    }
+  }
+
+  /**
+   * 复制 Store State：剔除 lang 后直接写入剪贴板，不落地文件
+   */
+  function copyStoreState() {
+    try {
+      const result = collectStoreState();
+      if (!result) return;
+
+      copyToClipboard(result.json);
+      showToast('✅ Store State 已复制到剪贴板（已移除 ' + result.langRemoved + ' 处 lang）');
+      console.log('%c✅ [NMD] Store State 已复制到剪贴板，来源：' + result.source + '，移除 lang 节点 ' + result.langRemoved + ' 处', 'color:#a6e3a1;font-weight:bold');
+
+    } catch (e) {
+      showToast('❌ 复制失败：' + e.message);
+      console.error('[NMD] copyStoreState 异常', e);
     }
   }
 
@@ -856,6 +893,10 @@
         icon: '💾', label: '导出 Store State JSON（去 lang）', color: '#f5c2e7',
         action: function () { toggle(false); exportStoreState(); },
       },
+      {
+        icon: '📋', label: '复制 Store State JSON（去 lang）', color: '#f5c2e7',
+        action: function () { toggle(false); copyStoreState(); },
+      },
       // ── 分隔符 ──
       { divider: true },
       // ── 分组：工具 ──
@@ -981,7 +1022,7 @@
     document.body.appendChild(menu);
     document.body.appendChild(panel);
 
-    console.log('%c🚀 Network MD v3.7.2 已启动 — 最新请求置顶，支持单选/多选导出，Store State 导出会剔除 lang 节点', 'color:#89b4fa;font-size:13px;font-weight:bold');
+    console.log('%c🚀 Network MD v3.8.0 已启动 — 最新请求置顶，支持单选/多选导出，Store State 导出/复制会剔除 lang 节点', 'color:#89b4fa;font-size:13px;font-weight:bold');
   }
 
   // ─── 控制台命令 ──────────────────────────────────────────
@@ -1006,6 +1047,7 @@
   win.__clearRequests = function () { requests.clear(); console.log('🗑️ 已清空'); };
   // ✨ 新增控制台命令
   win.__exportStoreState = function () { exportStoreState(); };
+  win.__copyStoreState = function () { copyStoreState(); };
 
   // ─── 初始化 ──────────────────────────────────────────────
 
