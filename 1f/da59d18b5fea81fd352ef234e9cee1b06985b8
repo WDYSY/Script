@@ -1,0 +1,19 @@
+"Network MD 导出工具-单选直接导出.user.js"
+  s_c331674ed1a77f::t_d4ef7a97d31871 4-5,244,298-323,325-326,363,365,400,418,1052
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "1fda59d18b5fea81fd352ef234e9cee1b06985b8",
+  "prompts": {},
+  "sessions": {
+    "s_c331674ed1a77f": {
+      "agent_id": {
+        "tool": "chengxiaobang",
+        "id": "s_hc7ys2x32to3",
+        "model": "glm-5.3"
+      },
+      "human_author": "Wang Yan <wangyan@trip.com>"
+    }
+  }
+}
